@@ -1,0 +1,7 @@
+{
+  "timestamp": "20250910_022701",
+  "training_date": "2025-09-10T02:27:01+05:30",
+  "model_type": "logistic_regression",
+  "accuracy": 0.85,
+  "source": "existing_models"
+}

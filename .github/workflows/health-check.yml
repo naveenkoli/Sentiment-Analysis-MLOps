@@ -1,0 +1,56 @@
+name: Health Check
+
+on:
+  schedule:
+    - cron: '0 */6 * * *'  # Every 6 hours
+  workflow_dispatch:
+
+jobs:
+  health-check:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - uses: actions/checkout@v3
+    
+    - name: Build and start services
+      run: |
+        docker-compose up -d
+        sleep 30
+    
+    - name: Health check
+      run: |
+        echo "🏥 Running health checks..."
+        
+        # API health check
+        HEALTH_STATUS=$(curl -s http://localhost:8000/health | jq -r '.status')
+        echo "Health status: $HEALTH_STATUS"
+        
+        if [ "$HEALTH_STATUS" != "healthy" ]; then
+          echo "❌ Health check failed"
+          exit 1
+        fi
+        
+        # Test prediction
+        PREDICTION=$(curl -s -X POST "http://localhost:8000/api/predict" \
+          -H "Content-Type: application/json" \
+          -d '{"text": "This is a test message"}' | jq -r '.sentiment')
+        
+        echo "Test prediction: $PREDICTION"
+        
+        if [ -z "$PREDICTION" ] || [ "$PREDICTION" == "null" ]; then
+          echo "❌ Prediction test failed"
+          exit 1
+        fi
+        
+        echo "✅ All health checks passed"
+    
+    - name: Cleanup
+      if: always()
+      run: |
+        docker-compose down
+    
+    - name: Notify on failure
+      if: failure()
+      run: |
+        echo "🚨 Health check failed! Please investigate."
+        # Add notification logic here (Slack, email, etc.)

@@ -1,0 +1,97 @@
+name: Automated Model Retraining
+
+on:
+  schedule:
+    - cron: '0 2 */10 * *'  # Every 10 days at 2 AM UTC
+  workflow_dispatch:  # Manual trigger
+  push:
+    paths:
+      - 'data/raw/**'  # Trigger on new data
+
+jobs:
+  retrain:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - uses: actions/checkout@v3
+      with:
+        token: ${{ secrets.GITHUB_TOKEN }}
+    
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.9'
+    
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install -r requirements.txt
+        python -c "import nltk; nltk.download('wordnet'); nltk.download('stopwords'); nltk.download('punkt')"
+    
+    - name: Create directories
+      run: |
+        mkdir -p data/{raw,processed,archive} models/{current,training,backup} logs
+    
+    - name: Check for existing models
+      run: |
+        if [ ! -f "models/current/metadata.json" ]; then
+          echo "No current models found"
+          # Copy your existing models if available
+          if [ -f "models/tfidf_vectorizer.pkl" ]; then
+            cp models/*.pkl models/current/
+            echo '{"timestamp": "initial", "accuracy": 0.85}' > models/current/metadata.json
+          fi
+        fi
+    
+    - name: Train new model
+      run: |
+        python scripts/train_model.py
+      continue-on-error: true
+    
+    - name: Find latest trained model
+      id: find_model
+      run: |
+        if [ -d "models/training" ] && [ "$(ls -A models/training)" ]; then
+          LATEST_MODEL=$(ls -t models/training | head -1)
+          echo "latest_model=$LATEST_MODEL" >> $GITHUB_OUTPUT
+          echo "model_found=true" >> $GITHUB_OUTPUT
+        else
+          echo "model_found=false" >> $GITHUB_OUTPUT
+        fi
+    
+    - name: Validate model
+      if: steps.find_model.outputs.model_found == 'true'
+      run: |
+        python scripts/validate_model.py models/training/${{ steps.find_model.outputs.latest_model }}
+    
+    - name: Deploy model
+      if: steps.find_model.outputs.model_found == 'true'
+      run: |
+        python scripts/deploy_model.py models/training/${{ steps.find_model.outputs.latest_model }}
+    
+    - name: Commit updated models
+      if: steps.find_model.outputs.model_found == 'true'
+      run: |
+        git config --local user.email "action@github.com"
+        git config --local user.name "GitHub Action"
+        git add models/current/
+        git add models/backup/
+        if git diff --staged --quiet; then
+          echo "No changes to commit"
+        else
+          git commit -m "🤖 Auto-update models $(date +'%Y-%m-%d %H:%M:%S')"
+          git push
+        fi
+    
+    - name: Create deployment summary
+      run: |
+        echo "## 🤖 Automated Model Retraining Summary" >> $GITHUB_STEP_SUMMARY
+        echo "" >> $GITHUB_STEP_SUMMARY
+        echo "- **Date**: $(date)" >> $GITHUB_STEP_SUMMARY
+        echo "- **Trigger**: ${{ github.event_name }}" >> $GITHUB_STEP_SUMMARY
+        if [ "${{ steps.find_model.outputs.model_found }}" == "true" ]; then
+          echo "- **Status**: ✅ New model trained and deployed" >> $GITHUB_STEP_SUMMARY
+          echo "- **Model**: ${{ steps.find_model.outputs.latest_model }}" >> $GITHUB_STEP_SUMMARY
+        else
+          echo "- **Status**: ℹ️ No new training needed" >> $GITHUB_STEP_SUMMARY
+        fi

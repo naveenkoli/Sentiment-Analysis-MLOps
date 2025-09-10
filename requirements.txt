@@ -1,0 +1,16 @@
+fastapi
+uvicorn
+pandas
+numpy
+scikit-learn
+nltk
+python-multipart
+Jinja2
+python-dotenv
+watchdog
+pytest
+pytest-asyncio
+requests
+httpx
+
+
